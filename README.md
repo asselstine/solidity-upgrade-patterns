@@ -1,4 +1,4 @@
-# Contract Storage and Upgrading in Production Dapps
+# Contract Storage and Upgrades in Production Ethereum Dapps
 
 ## Motivation
 
@@ -17,11 +17,11 @@ This means two things:
 
 Smart contract security is covered really well by articles all over the internet.  The exploits are famous (see the [DAO](http://hackingdistributed.com/2016/06/18/analysis-of-the-dao-exploit/)) and have been well publicized and analyzed.
 
-Contract upgradeability is also [well defined](https://blog.indorse.io/ethereum-upgradeable-smart-contract-strategies-456350d0557c), but how the pattern fits into application architecture was less clear to me.  I decided to survey the landscape of Ethereum projects to see how they integrate the proxy abstraction.
+Contract upgradeability is also [well defined](https://blog.indorse.io/ethereum-upgradeable-smart-contract-strategies-456350d0557c), but how the pattern fits into application architecture was less clear to me.  I decided to survey the landscape of Ethereum projects.
 
 ## Introduction
 
-In this article I examine several mature Ethereum projects to see how they approach contract storage and upgrades.  I'll be examining [Augur](http://www.augur.net/), [Colony](https://colony.io/), [Aragon](https://aragon.one/) and [Rocket Pool](https://www.rocketpool.net/).
+In this article I examine several mature Ethereum projects to see how they approach contract storage and upgrades.  I'll be examining [Augur](http://www.augur.net/), [Colony](https://colony.io/), [Aragon](https://aragon.one/) and [Rocket Pool](https://www.rocketpool.net/).  I've tried to stick strictly to analysis and have avoided projecting any opinions on the code.
 
 Before continuing you should have a solid understanding of the [`DELEGATECALL`](http://solidity.readthedocs.io/en/develop/assembly.html) opcode.  Most of the projects use this opcode to implement upgradeable contracts.  For an example see Manuel Aráoz's [Dispatcher](https://github.com/maraoz/solidity-proxy/blob/master/contracts/Dispatcher.sol).  More examples can be found in the references section below.
 
@@ -61,15 +61,13 @@ contract Controller {
 
 This allows any contract to look up another using a hashed name.  It also means that contracts can be replaced at runtime by re-registering them.
 
-The Controller is not upgradeable.  Deploying a new Controller contract would be considered a major upgrade to the system and would be handled using a different process.
-
 ## Deployment
 
-Augur uses a set of custom deployment scripts written in TypeScript to deploy their contracts.  The contracts are deployed as such:
+Augur uses a set of custom deployment scripts written in TypeScript to deploy their contracts.  When the application is first deployed:
 
 1. The Controller is deployed.
-2. The Augur contract is deployed and the Controller state variable is set.
-3. The remaining contracts are each deployed, the Controller state variable set, then registered with the Controller.
+2. The Augur contract is deployed and updated with the Controller address.
+3. The remaining contracts are each deployed, updated with the Controller address, and then registered with the Controller.
 
 In this way we can see that the system is partially upgradeable.  The Controller and Augur contracts are static, but the rest of the contracts can be upgraded by re-registering them with the controller.
 
@@ -94,6 +92,8 @@ contract Delegator is DelegationTarget {
     }
 }
 ```
+
+### Factories
 
 To create these Delegator instances nearly every contract type has a corresponding factory.
 
@@ -129,11 +129,17 @@ contract ExampleFactory is Controlled {
 }
 ```
 
-You may have noticed that the ExampleValueObject inherits from DelegationTarget somewhat needlessly; this is so that the ExampleValueObject storage will be correctly offset by the amount of storage required by the Delegator, thereby preventing any memory from being trampled.  The memory constraints are well defined in this [gist](https://gist.github.com/Arachnid/4ca9da48d51e23e5cfe0f0e14dd6318f) by Nick Johnson.
+Contracts will use the Controller to lookup the contract factory, then call the factory's create method to create a new instance of a contract.
 
-Not all contracts that require storage are created by a factory.  Some contracts are singletons and are instead registered twice in the controller: the first being an instance of the contract whose name is suffixed with 'Target' and the second being a Delegator registered under the original name and pointing to the suffixed name.
+You may have noticed that the ExampleValueObject inherits from DelegationTarget somewhat needlessly; this is so that the ExampleValueObject storage will be correctly offset by the amount of storage required by the Delegator, thereby preventing any memory from being trampled.  The memory constraints are nicely detailed in this [gist](https://gist.github.com/Arachnid/4ca9da48d51e23e5cfe0f0e14dd6318f) by Nick Johnson.
+
+### Singletons
+
+Some contracts exist globally as singletons and don't need a factory. These singletons are instead registered twice in the controller: the first being an instance of the contract whose name is suffixed with 'Target' and the second being a Delegator registered under the original name and pointing to the suffixed name.  In this way the original contract with the suffixed name can be swapped out while the Delegator remains the same.  Savvy?
 
 ### Upgrades
+
+Augur is partially upgradeable.  The majority of contracts can be swapped out at runtime by re-registering them in the Controller, but some core contracts of the system such as Controller and Augur cannot be swapped out: changing these contracts would necessitate an entirely new app deployment.  In fact there is code that halts the entire system and allows users to withdraw their funds.
 
 It's interesting to note that they plan on locking down the registry by disabling a '[dev-mode](https://github.com/AugurProject/augur-core/blob/7f3c79a5dd471a98df8f66a640902e063f15f796/source/contracts/Controller.sol#L6)' in the Controller.  At some point they will freeze the contracts in production and lock themselves out of the Controller.  Afterwards, if they want to upgrade, they will need to deploy an entirely new version of the application.
 
