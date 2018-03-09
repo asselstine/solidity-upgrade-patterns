@@ -1,4 +1,4 @@
-# Solidity Design Patterns
+# Contract Storage and Upgrading in Production Dapps
 
 ## Motivation
 
@@ -27,44 +27,9 @@ Before continuing you should have a solid understanding of the [`DELEGATECALL`](
 
 ## Augur
 
-[Augur](http://www.augur.net/) is a prediction market that allows people to gamble on the outcomes of future events.  It's been under development since 2014 and has a strong team of developers behind it.  Augur is an extremely transparent organization and publishes it's smart contracts to Github under [augur-core](https://github.com/AugurProject/augur-core).
+[Augur](http://www.augur.net/) is a prediction market that allows people to gamble on the outcomes of future events.  It's been under development since 2014 and has a strong team of developers behind it.  Augur publishes it's smart contracts to Github under [augur-core](https://github.com/AugurProject/augur-core).
 
-### Structure
-
-Augur consists of 70+ smart contracts.  All of the contracts (with the exception of some edge cases) inherit 
-
-
-All of these contracts are registered with a singleton [Controller](https://github.com/AugurProject/augur-core/blob/master/source/contracts/Controller.sol).  The controller stores a bytes32 to ContractDetails mapping.  Each ContractDetails struct contains the address of the deployed contract and a few bookkeeping fields.
-
-```solidity
-contract Controller is IController {
-    struct ContractDetails {
-        bytes32 name;
-        address contractAddress;
-        bytes20 commitHash;
-        bytes32 bytecodeHash;
-    }
-    mapping(bytes32 => ContractDetails) public registry;
-
-    function lookup(bytes32 _key) public view returns (address) {
-        return registry[_key].contractAddress;
-    }
-
-    function registerContract(bytes32 _key, address _address, bytes20 _commitHash, bytes32 _bytecodeHash) public onlyOwnerCaller returns (bool) {
-        registry[_key] = ContractDetails(_key, _address, _commitHash, _bytecodeHash);
-        getAugur().logContractAddedToRegistry(_key, _address, _commitHash, _bytecodeHash);
-        return true;
-    }
-
-    // yadda yadda yadda
-}
-```
-
-This allows contracts to be looked up via a hashed name and replaced with new versions.
-
-There is only ever one version of the controller; it is not upgradeable once it is deployed.  Deploying a new Controller contract would be considered a major upgrade to the system and handled using a different process.
-
-Every contract in the system inherits from [Controlled](https://github.com/AugurProject/augur-core/blob/master/source/contracts/Controlled.sol).  Controlled contracts store a reference to the Controller, so that they are able to use `Controller#lookup` to retrieve other contracts in the system.
+Augur consists of 70+ smart contracts.  Nearly all of the contracts inherit from [Controlled](https://github.com/AugurProject/augur-core/blob/7f3c79a5dd471a98df8f66a640902e063f15f796/source/contracts/Controlled.sol).  Controlled contracts store a reference to a [Controller](https://github.com/AugurProject/augur-core/blob/7f3c79a5dd471a98df8f66a640902e063f15f796/source/contracts/Controller.sol).
 
 ```solidity
 contract Controlled is IControlled {
@@ -72,7 +37,45 @@ contract Controlled is IControlled {
 }
 ```
 
-Nearly every contract that stores data in the system is created using a Factory.  The Factories use a variant of the [Delegator](https://github.com/AugurProject/augur-core/blob/master/source/contracts/libraries/Delegator.sol) pattern to effectively "instantiate" new instances of contracts.  A new Delegator is constructed using the address of the controller and the name of the desired contract.
+The Controller acts as a contract registry.  It provides a [`lookup(bytes32)`](https://github.com/AugurProject/augur-core/blob/7f3c79a5dd471a98df8f66a640902e063f15f796/source/contracts/Controller.sol#L97) method so that contracts can be retrieved by name.
+
+```solidity
+// Note that the code has been simplified
+
+contract Controller {
+    struct ContractDetails {
+        bytes32 name;
+        address contractAddress;
+    }
+    mapping(bytes32 => ContractDetails) public registry;
+
+    function lookup(bytes32 _key) public view returns (address) {
+        return registry[_key].contractAddress;
+    }
+
+    function registerContract(bytes32 _key, address _address) {
+        registry[_key] = ContractDetails(_key, _address);
+    }
+}
+```
+
+This allows any contract to look up another using a hashed name.  It also means that contracts can be replaced at runtime by re-registering them.
+
+The Controller is not upgradeable.  Deploying a new Controller contract would be considered a major upgrade to the system and would be handled using a different process.
+
+## Deployment
+
+Augur uses a set of custom deployment scripts written in TypeScript to deploy their contracts.  The contracts are deployed as such:
+
+1. The Controller is deployed.
+2. The Augur contract is deployed and the Controller state variable is set.
+3. The remaining contracts are each deployed, the Controller state variable set, then registered with the Controller.
+
+In this way we can see that the system is partially upgradeable.  The Controller and Augur contracts are static, but the rest of the contracts can be upgraded by re-registering them with the controller.
+
+## Storage
+
+Augur contracts contain both state variables and behaviour.  They have not been separated. However, in a running application, the state is actually stored in Delegator instances.  The Delegators will delegate to a registered contract and therefore adopt the same storage shape and behaviour.
 
 ```solidity
 contract DelegationTarget is Controlled {
@@ -92,18 +95,17 @@ contract Delegator is DelegationTarget {
 }
 ```
 
-The Delegator will effectively become an instance of the target contract because it implicitly shares the same storage shape and behaviour through the fallback function and the `DELEGATECALL` opcode.  Notice that the storage is separated into a `DelegationTarget` superclass; this is important because our target contracts need to inherit the Delegator fields as well.  By inheriting these fields the target contract's storage will be offset by the correct amount so that it doesn't trample the Delegator field storage.  Savvy?
+To create these Delegator instances nearly every contract type has a corresponding factory.
 
-It's not evident in the psuedocode above, but note that the assembly uses the [`returndatasize`](http://solidity.readthedocs.io/en/develop/assembly.html) opcode introduced in the [Byzantium](https://blog.ethereum.org/2017/10/12/byzantium-hf-announcement/) upgrade.
-
-Here is an example contract:
+For example:
 
 ```solidity
 contract IExampleValueObject {
+  function initialize() external;
   function get() external view returns (uint);
 }
 
-contract ExampleValueObject is DelegationTarget {
+contract ExampleValueObject is DelegationTarget, IExampleValueObject {
   uint private value;
 
   function initialize() external {
@@ -127,19 +129,19 @@ contract ExampleFactory is Controlled {
 }
 ```
 
-You'll notice above that the new contract instance is of the type Delegator.  When the Delegator delegates the `initialize()` call to ExampleValueObject and the code writes to the `value` field we want it to write into the first storage location after the `controller` and `controllerLookupName` fields.  That's why ExampleValueObject inherits from DelegationTarget: to shift the storage read/write positions.
+You may have noticed that the ExampleValueObject inherits from DelegationTarget somewhat needlessly; this is so that the ExampleValueObject storage will be correctly offset by the amount of storage required by the Delegator, thereby preventing any memory from being trampled.  The memory constraints are well defined in this [gist](https://gist.github.com/Arachnid/4ca9da48d51e23e5cfe0f0e14dd6318f) by Nick Johnson.
 
-If the ExampleValueObject contract is updated with new fields, they *must* be defined *after* the existing fields so that fields aren't trampled in instances of Delegator that have been bound to that type.  The constraints are very well defined in this [gist](https://gist.github.com/Arachnid/4ca9da48d51e23e5cfe0f0e14dd6318f) by Nick Johnson.
+Not all contracts that require storage are created by a factory.  Some contracts are singletons and are instead registered twice in the controller: the first being an instance of the contract whose name is suffixed with 'Target' and the second being a Delegator registered under the original name and pointing to the suffixed name.
 
-### Summary
+### Upgrades
 
-Augur uses a combination of a contract registry and delegate to allow for partial upgrading of their system.  It's interesting to note that they plan on locking down the registry by disabling a '[dev-mode](https://github.com/AugurProject/augur-core/blob/master/source/contracts/Controller.sol#L6)' in the Controller.  At some point they will freeze the contracts in production and lock themselves out of the Controller.  Afterwards, if they want to deploy an upgrade it will result in an entirely separate set of contracts; in a sense forking the application.
+It's interesting to note that they plan on locking down the registry by disabling a '[dev-mode](https://github.com/AugurProject/augur-core/blob/7f3c79a5dd471a98df8f66a640902e063f15f796/source/contracts/Controller.sol#L6)' in the Controller.  At some point they will freeze the contracts in production and lock themselves out of the Controller.  Afterwards, if they want to upgrade, they will need to deploy an entirely new version of the application.
 
 ## Colony
 
 [Colony](https://github.com/JoinColony/colonyNetwork)
 
-- Colony, like Aragon, has a 'ColonyStorage' superclass that stores the Contract fields.  The Colony object subclasses it.
+- Colony, like Aragon, has a 'ColonyStorage' superclass that stores the Contract state variables.  The Colony object subclasses it.
 
 - Colony has a [Resolver](https://github.com/JoinColony/colonyNetwork/blob/develop/contracts/Resolver.sol) contract that appears to manage
 
@@ -167,7 +169,7 @@ The EtherRouter serves as the `DELEGATECALL` mechanism.  It's fallback function 
 
 Note that Colony, ColonyTask, ColonyFunding and ColonyTransactionReviewer all inherit from ColonyStorage.  ColonyNetwork and ColonyNetworkStaking both inherit from ColonyNetworkStorage.  
 
-To create a new Colony the `ColonyNetwork#createColony(...)` function is called.  The `ColonyNetworkStorage` contains the field `mapping (bytes32 => address) _colonies` which maps the EtherRouter instances for each Colony.  On creation, the `EtherRouter` instance is bound to the latest version of the Colony `Resolver` (which has the latest versions of the Colony, ColonyTask, ColonyFunding and ColonyTransactionReviewer contracts registered).
+To create a new Colony the `ColonyNetwork#createColony(...)` function is called.  The `ColonyNetworkStorage` contains the state variable `mapping (bytes32 => address) _colonies` which maps the EtherRouter instances for each Colony.  On creation, the `EtherRouter` instance is bound to the latest version of the Colony `Resolver` (which has the latest versions of the Colony, ColonyTask, ColonyFunding and ColonyTransactionReviewer contracts registered).
 
 ##### Upgrades
 
