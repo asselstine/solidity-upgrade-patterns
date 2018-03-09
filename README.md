@@ -21,9 +21,9 @@ Contract upgradeability is also [well defined](https://blog.indorse.io/ethereum-
 
 ## Introduction
 
-In this article I examine several mature Ethereum projects to see how they approach contract storage and upgrades.  I'll be examining [Augur](http://www.augur.net/), [Colony](https://colony.io/), [Aragon](https://aragon.one/) and [Rocket Pool](https://www.rocketpool.net/).  I've tried to stick strictly to analysis and have avoided projecting any opinions on the code.
+In this article I examine several mature Ethereum projects to see how they approach contract storage and upgrades.  I've tried to stick strictly to analysis and have avoided giving opinions or making assumptions.  I'll be examining [Augur](http://www.augur.net/), [Colony](https://colony.io/), [Aragon](https://aragon.one/) and [Rocket Pool](https://www.rocketpool.net/).  I picked these projects because they are relatively complete, have public codebases, and showcase something unique.
 
-Before continuing you should have a solid understanding of the [`DELEGATECALL`](http://solidity.readthedocs.io/en/develop/assembly.html) opcode.  Most of the projects use this opcode to implement upgradeable contracts.  For an example see Manuel Aráoz's [Dispatcher](https://github.com/maraoz/solidity-proxy/blob/master/contracts/Dispatcher.sol).  More examples can be found in the references section below.
+Before continuing you should have a solid understanding of the [`DELEGATECALL`](http://solidity.readthedocs.io/en/develop/assembly.html) opcode.  Most of the projects use this opcode to implement upgradeable contracts.  For a post-Byzantium example of opcode usage see Manuel Aráoz's [Dispatcher](https://github.com/maraoz/solidity-proxy/blob/master/contracts/Dispatcher.sol). For a pre-Byzantium example see [EtherRouter](https://github.com/ownage-ltd/ether-router). More examples can be found in the references section below.
 
 ## Augur
 
@@ -145,49 +145,98 @@ It's interesting to note that they plan on locking down the registry by disablin
 
 ## Colony
 
-[Colony](https://github.com/JoinColony/colonyNetwork)
+[Colony](https://colony.io/) is a platform for creating decentralized organizations.  The code has recently been made public on Github under the [colonyNetwork](https://github.com/JoinColony/colonyNetwork) project.   The project history began in early 2016.
 
-- Colony, like Aragon, has a 'ColonyStorage' superclass that stores the Contract state variables.  The Colony object subclasses it.
+Colony consists of about 14 smart contracts.  Conceptually, these contracts can be divided into those that concern the Colony Network as a whole, and those that concern an individual Colony.  Concretely, the two groups are delineated by their inheritance hierarchy; all state variables are stored in either the [ColonyNetworkStorage](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyNetworkStorage.sol) or the [ColonyStorage](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyStorage.sol) contracts.  All contracts inherit from one of these.
 
-- Colony has a [Resolver](https://github.com/JoinColony/colonyNetwork/blob/develop/contracts/Resolver.sol) contract that appears to manage
+An individual Colony is defined by the contracts [Colony](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/Colony.sol), [ColonyTask](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyTask.sol), [ColonyFunding](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyFunding.sol), and [ColonyTransactionReviewer](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyTransactionReviewer.sol).  These contracts all inherit from ColonyStorage.
 
-Colony outlines their use of the [EtherRouter](https://github.com/ownage-ltd/ether-router) pattern in the Token Upgradeability section of their article on the [Colony Token Sale contract](https://blog.colony.io/colony-sale-contract-and-the-clny-token-3da67d833087)
+The Colony Network is defined by two contracts: [ColonyNetwork](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyNetwork.sol) and [ColonyNetworkStaking](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyNetworkStaking.sol).  These contracts inherit from ColonyNetworkStorage.
 
-##### Deployment
+The contracts within each group are registered with their respective [Resolver](https://github.com/JoinColony/colonyNetwork/blob/develop/contracts/Resolver.sol) instances. The Resolver acts as a function registry; contract addresses are looked up by their function signatures.
 
-1. Core contracts are deployed:
+```solidity
+// Simplified for brevity
+
+contract Resolver is DSAuth {
+  struct Pointer { address destination; uint outsize; }
+  mapping (bytes4 => Pointer) public pointers;
+
+  function register(string signature, address destination, uint outsize) public auth {
+    pointers[stringToSig(signature)] = Pointer(destination, outsize);
+  }
+
+  function lookup(bytes4 sig) public view returns(address, uint) {
+    return (destination(sig), outsize(sig));
+  }
+}
+```
+
+This means that function signatures [must be unique](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/helpers/upgradable-contracts.js#L12) across any contracts that are registered with the Resolver.  This also means that the registered contracts must share the same storage shape, because [EtherRouter](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/EtherRouter.sol) instances that point to this Resolver will take on the behaviour of all the registered contract functions.
+
+A Resolver that contains a set of Colony contracts is registered and versioned with the ColonyNetwork contract using the [`addColonyVersion()`](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyNetwork.sol#L153) method.
+
+```solidity
+contract ColonyNetwork is ColonyNetworkStorage {
+  function addColonyVersion(uint _version, address _resolver) public auth {
+    colonyVersionResolver[_version] = _resolver;
+    if (_version > latestColonyVersion) {
+      latestColonyVersion = _version;
+    }
+  }
+}
+```
+
+New Colonies are created through the ColonyNetwork contract using the [createColony()](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyNetwork.sol#L111) method.  This method will create a new EtherRouter instance and register it under the desired name.  The EtherRouter is then bound to the most recent Colony Resolver version.
+
+```solidity
+// Simplified for brevity
+
+contract ColonyNetwork is ColonyNetworkStorage {
+  function createColony(bytes32 _name) {
+    var etherRouter = new EtherRouter();
+    etherRouter.setResolver(colonyVersionResolver[latestColonyVersion]);
+    _colonies[_name] = colony;
+  }
+}
+```
+
+### Deployment
+
+Colony uses Truffle for contract deployment.  The steps are as follows:
+
+1. The Colony Network contracts are deployed:
   - ColonyNetwork
   - ColonyNetworkStaking
   - EtherRouter
   - Resolver
-2. The ColonyNetwork and ColonyNetworkStaking contracts are registered in the Resolver
+2. The ColonyNetwork and ColonyNetworkStaking contracts are registered with the Resolver
 3. The EtherRouter is set to point to the Resolver
 4. The Colony contracts are deployed to the network
   - Colony
   - ColonyTask
   - ColonyFunding
   - ColonyTransactionReviewer
-5. The contracts from step 4 are bound to a Resolver which is then added as the first Colony version
+5. A new Resolver is created and each of the contracts from step 4 are registered.
+6. The new Resolver is added to the Colony Network as the first Colony version.
 
-##### Storage
+### Storage
 
-The EtherRouter serves as the `DELEGATECALL` mechanism.  It's fallback function will delegate to addresses registered in it's associated `Resolver` instance.  The `Resolver` is a function registry in that you register a function signature and point it to a contract address.  This means that all contracts registered in a Resolver will share the same storage address and shape, and must not have any conflicting function signatures.
+The first EtherRouter that is deployed becomes the main point of entry for the platform.  It acts as the storage and will take on the storage shape and behaviour of the contracts in the Colony Network Resolver (it's shape will be the same as ColonyNetworkStorage).
 
-Note that Colony, ColonyTask, ColonyFunding and ColonyTransactionReviewer all inherit from ColonyStorage.  ColonyNetwork and ColonyNetworkStaking both inherit from ColonyNetworkStorage.  
-
-To create a new Colony the `ColonyNetwork#createColony(...)` function is called.  The `ColonyNetworkStorage` contains the state variable `mapping (bytes32 => address) _colonies` which maps the EtherRouter instances for each Colony.  On creation, the `EtherRouter` instance is bound to the latest version of the Colony `Resolver` (which has the latest versions of the Colony, ColonyTask, ColonyFunding and ColonyTransactionReviewer contracts registered).
+As mentioned previously, when the Colony Network creates a Colony it will create a new instance of an EtherRouter that points to the latest version of the Colony Resolver.  In this way the Colony EtherRouter will take on the storage shape of the latest Resolver version (it's shape will be the same as ColonyStorage).
 
 ##### Upgrades
 
-To upgrade the `ColonyNetwork` or `ColonyNetworkStaking` contracts the user would need to register the new contracts with the global Resolver.  The global EtherRouter would immediately refer to the new code and the behaviour of the system would change.
+Colony is almost entirely upgradeable; the only exceptions are the EtherRouter and the Resolver.
 
-To upgrade the Colony, ColonyTask, ColonyFunding or ColonyTransactionReviewer contracts the user would need to: deploy them, register them with a new Resolver, and then add the Resolver as the newest version to the ColonyNetwork.
+To upgrade the Colony Network contracts the user would need to deploy and register the new contracts with the global Resolver.  The global EtherRouter would immediately refer to the new code and the behaviour of the Colony Network would change.
 
-Once the newest Resolver is deployed, each Colony would need to be upgraded using the  `ColonyNetwork#upgradeColony(...)` function which sets the EtherRouter instance's resolver to point to the latest `Resolver` version.  In this way Colonies can be upgraded separately.
+To upgrade the Colony, ColonyTask, ColonyFunding or ColonyTransactionReviewer contracts the user would need to deploy and register the contract with a new Resolver, then add that resolver as a new version in the Colony Network.  They can then use the [`ColonyNetwork#upgradeColony(...)`](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyNetwork.sol#L171) to upgrade their Colony to the new version.
 
 #### Summary
 
-Colony uses the pre-Byzantium style [EtherRouter](https://github.com/ownage-ltd/ether-router) pattern to upgrade contracts.  A global registry is maintained for ColonyNetwork and ColonyNetworkStaking contracts and a set of versioned registries are maintained within the ColonyNetwork so that Colonies can be independently versioned.
+Colony uses the pre-Byzantium style [EtherRouter](https://github.com/ownage-ltd/ether-router) pattern to upgrade contracts.  A global Resolver is maintained for ColonyNetwork and ColonyNetworkStaking contracts and a versioned registry of Resolvers is maintained within the ColonyNetwork so that Colonies can be independently versioned and upgraded.
 
 ## Rocketpool
 
