@@ -240,9 +240,34 @@ Colony uses the pre-Byzantium style [EtherRouter](https://github.com/ownage-ltd/
 
 ## Rocketpool
 
-[Rocketpool](https://github.com/rocket-pool/rocketpool) is an application that provides staking pools for the upcoming Casper proof-of-stake protocol for Ethereum.  It's not an old codebase, but it showcases a different style of storage that I think is worth highlighting.
+[Rocketpool](https://www.rocketpool.net/) is an application that provides staking pools for the upcoming Casper proof-of-stake protocol for Ethereum.  It's not an old codebase, but it showcases a very different approach that I think is worth discussing.  The project began around the end of 2016.  The smart contract code is published on Github under [rocketpool](https://github.com/rocket-pool/rocketpool).
 
+Rocketpool consists of about 16 contracts.  This is the only project I reviewed that does not use the DELEGATECALL opcode; instead opting for a design that [separates storage and behaviour](https://medium.com/rocket-pool/upgradable-solidity-contract-design-54789205276d).
 
+All of the contracts, with the exception of [RocketStorage](https://github.com/rocket-pool/rocketpool/blob/3e66165880346f0c4e95c7eea345b5cecdf3defc/contracts/RocketStorage.sol) inherit from the [RocketBase](https://github.com/rocket-pool/rocketpool/blob/3e66165880346f0c4e95c7eea345b5cecdf3defc/contracts/RocketBase.sol).  The RocketBase contract stores the address of the RocketStorage contract:
+
+```solidity
+contract RocketBase {
+    RocketStorageInterface rocketStorage = RocketStorageInterface(0);
+
+    function RocketBase(address _rocketStorageAddress) public {
+        rocketStorage = RocketStorageInterface(_rocketStorageAddress);
+    }
+}
+```
+
+The RocketStorage contract serves as a generic data store holding registries of primitives such as addresses, uint256, bool etc.
+
+```solidity
+contract RocketStorage {
+    mapping(bytes32 => uint256)    private uIntStorage;
+    mapping(bytes32 => string)     private stringStorage;
+    mapping(bytes32 => address)    private addressStorage;
+    mapping(bytes32 => bytes)      private bytesStorage;
+    mapping(bytes32 => bool)       private boolStorage;
+    mapping(bytes32 => int256)     private intStorage;
+}
+```
 
 
 
