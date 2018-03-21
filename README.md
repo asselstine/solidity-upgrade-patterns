@@ -8,22 +8,6 @@ My background is in web and mobile application development.  After writing my fi
 
 Before continuing you **must** have a solid understanding of the [`DELEGATECALL`](http://solidity.readthedocs.io/en/develop/assembly.html) opcode.  Martin Swende gives an excellent [explanation](http://martin.swende.se/blog/EVM-Assembly-trick.html) of it's usage. Most projects use this opcode to implement upgradeable contracts.  Quite often the pattern is called Proxy, Delegator, or Dispatcher.  Because the `returndatasize` opcode was introduced in Byzantium, there are two different styles of patterns.  The newer style uses the `returndatasize` opcode to provide a generic solution.  The old style requires the developer to track the return value storage size of each function registered. For a post-Byzantium example of generic opcode usage see Manuel Aráoz's [Dispatcher](https://github.com/maraoz/solidity-proxy/blob/master/contracts/Dispatcher.sol). For a pre-Byzantium example see [EtherRouter](https://github.com/ownage-ltd/ether-router).
 
-<!-- A Delegator is a contract that delegates all function calls to another contract using the DELEGATECALL opcode.  The Delegators will therefore adopt the same storage shape and behaviour as the target contract.
-
-```solidity
-contract Delegator is DelegationTarget {
-    function Delegator(IController _controller, bytes32 _controllerLookupName) public {
-        controller = _controller;
-        controllerLookupName = _controllerLookupName;
-    }
-
-    function() external payable {
-        address _target = controller.lookup(controllerLookupName);
-        // yadda yadda yadda assembly { DELEGATECALL }
-    }
-}
-``` -->
-
 For a high-level overview of the different storage and upgrade patterns, see [Jack Tanner's article](https://blog.indorse.io/ethereum-upgradeable-smart-contract-strategies-456350d0557c).  He has also listed numerous useful links.
 
 ## Augur
@@ -87,7 +71,7 @@ contract Delegator is DelegationTarget {
 
     function() external payable {
         address _target = controller.lookup(controllerLookupName);
-        // yadda yadda yadda assembly { DELEGATECALL }
+        // assembly { DELEGATECALL }
     }
 }
 ```
@@ -128,7 +112,7 @@ contract ExampleValueObject is DelegationTarget, IExampleValueObject {
 }
 ```
 
-Contracts that wish to create new instances will use the Controller to lookup the contract factory then call the factory's create method to create a new instance of a contract.
+The caller will use the Controller to lookup the contract factory then call the factory's create method to create a new instance of a delegator pointing to the contract.
 
 ### Singletons
 
@@ -235,13 +219,11 @@ To upgrade the Colony, ColonyTask, ColonyFunding or ColonyTransactionReviewer co
 
 Both Augur and Colony rely on a generic proxy contract bound to a contract registry.  Augur always uses the latest version of a contract, while Colony allows colonies to be individually versioned.  Augur plans on locking down their contracts eventually, while Colony will remain upgradeable.
 
-The contract registries reminded me of the [Service locator](https://martinfowler.com/articles/injection.html#UsingAServiceLocator) pattern; when an object wants to use a service it uses the service locator to retrieve the desired dependency.  [Dependency injection](https://martinfowler.com/articles/injection.html#FormsOfDependencyInjection) is similar, but instead the service has all of it's dependencies added to it by a container.  [Aragon](https://aragon.one/) is a good example of constructor dependency injection. Aragon 'apps' declare their dependencies in a JSON file and when the app is deployed the Aragon OS injects the dependencies into the app smart contract.  Here is the Aragon core team's [Finance app contract initializer](https://github.com/aragon/aragon-apps/blob/c1182ccc0975a4f5e828eec4c81aa8a2c8baad45/apps/finance/contracts/Finance.sol#L114).
+The contract registries reminded me of the [Service locator](https://martinfowler.com/articles/injection.html#UsingAServiceLocator) pattern; when an object wants to use a service it uses the service locator to retrieve the desired dependency.  [Dependency injection](https://martinfowler.com/articles/injection.html#FormsOfDependencyInjection) is similar, but instead the service has all of it's dependencies added to it by a container.  [Aragon](https://aragon.one/) is a good example of constructor dependency injection. Aragon 'apps' declare their dependencies in a JSON file and when the app is deployed the Aragon OS injects the dependencies into the app smart contract.  The Aragon core team's Finance app relies on the Vault app. You can see the parameter in the [Finance app contract initializer](https://github.com/aragon/aragon-apps/blob/c1182ccc0975a4f5e828eec4c81aa8a2c8baad45/apps/finance/contracts/Finance.sol#L114).
 
-Another big takeaway for me was the complexity that delegates introduce.  Strict convention is required to ensure that the storage shape of contracts remain the same, and there can be a disparity between how code lays out storage and the storage shape at runtime.  For example in Colony groups of contracts are combined into a single delegate, so the storage variables across the entire group need to match.  Augur improves on this by having each contract correspond to a single delegate, so the storage variable shape is scoped to just one contract.
+Another big takeaway for me was the complexity that delegates introduce.  Strict convention is required to ensure that the storage shape of contracts is maintained.  For example: in Colony groups of contracts are combined into a single delegate.  This means that the storage variables across the entire group need to match.  Augur improves on this by having each contract correspond to a single delegate, so the storage variable shape is scoped to just one contract.  The Augur developers just need to be careful about storage shape changes.
 
-Diving into the code bases was a really interesting exercise.  I'd recommend it to any developer because the code bases are well-structured and rich with ideas.
-
-
+Diving into the code bases was a really interesting exercise.  Thanks for reading!
 
 
 
