@@ -6,7 +6,23 @@ In this article I examine two major Ethereum projects to see how they approach c
 
 My background is in web and mobile application development.  After writing my first few dapps, I quickly realized there were major shortcomings in my application architecture.  The immutability of smart contracts requires the developer to carefully consider how code will be updated.  I read all about upgradeable contract patterns, but I still didn't see how they fit into the application as a whole.  I decided to read the code bases of a number of projects.  Augur and Colony were my favourites.
 
-Before continuing you **must** have a solid understanding of the [`DELEGATECALL`](http://solidity.readthedocs.io/en/develop/assembly.html) opcode.  Martin Swende gives an excellent [explanation](http://martin.swende.se/blog/EVM-Assembly-trick.html) of it's usage. Most projects use this opcode to implement upgradeable contracts.  Quite often the pattern is called Proxy, Delegator, or Dispatcher.  Because the `returndatasize` opcode was introduced in Byzantium, there are two different styles of Delegators.  The newer style uses the `returndatasize` opcode to provide a generic solution.  The old style requires the developer to track the return value storage size of each function registered. For a post-Byzantium example of generic opcode usage see Manuel Aráoz's [Dispatcher](https://github.com/maraoz/solidity-proxy/blob/master/contracts/Dispatcher.sol). For a pre-Byzantium example see [EtherRouter](https://github.com/ownage-ltd/ether-router).
+Before continuing you **must** have a solid understanding of the [`DELEGATECALL`](http://solidity.readthedocs.io/en/develop/assembly.html) opcode.  Martin Swende gives an excellent [explanation](http://martin.swende.se/blog/EVM-Assembly-trick.html) of it's usage. Most projects use this opcode to implement upgradeable contracts.  Quite often the pattern is called Proxy, Delegator, or Dispatcher.  Because the `returndatasize` opcode was introduced in Byzantium, there are two different styles of patterns.  The newer style uses the `returndatasize` opcode to provide a generic solution.  The old style requires the developer to track the return value storage size of each function registered. For a post-Byzantium example of generic opcode usage see Manuel Aráoz's [Dispatcher](https://github.com/maraoz/solidity-proxy/blob/master/contracts/Dispatcher.sol). For a pre-Byzantium example see [EtherRouter](https://github.com/ownage-ltd/ether-router).
+
+<!-- A Delegator is a contract that delegates all function calls to another contract using the DELEGATECALL opcode.  The Delegators will therefore adopt the same storage shape and behaviour as the target contract.
+
+```solidity
+contract Delegator is DelegationTarget {
+    function Delegator(IController _controller, bytes32 _controllerLookupName) public {
+        controller = _controller;
+        controllerLookupName = _controllerLookupName;
+    }
+
+    function() external payable {
+        address _target = controller.lookup(controllerLookupName);
+        // yadda yadda yadda assembly { DELEGATECALL }
+    }
+}
+``` -->
 
 For a high-level overview of the different storage and upgrade patterns, see [Jack Tanner's article](https://blog.indorse.io/ethereum-upgradeable-smart-contract-strategies-456350d0557c).  He has also listed numerous useful links.
 
@@ -58,13 +74,11 @@ In this way we can see that the system is partially upgradeable.  The Controller
 
 ## Storage
 
-Augur contracts contain both state variables and behaviour.  They have not been separated in the written code. However, in a running application, the state is actually stored in Delegator instances.  A Delegator in Augur is a contract that can delegate all function calls to another contract (using the DELEGATECALL opcode).  The Delegators will therefore adopt the same storage shape and behaviour as the target contract.
+Augur stores some of it's data in [singletons](https://en.wikipedia.org/wiki/Singleton_pattern); i.e. there is only one global instance.  The rest of the data is stored in contracts created by factories.
+
+When a new contract is created, it is always a Delegator instance pointing to the corresponding contract.  A Delegator is a contract that delegates all function calls to another contract using the DELEGATECALL opcode.  The Delegators will therefore adopt the same storage shape and behaviour as the target contract.
 
 ```solidity
-contract DelegationTarget is Controlled {
-  bytes32 public controllerLookupName;
-}
-
 contract Delegator is DelegationTarget {
     function Delegator(IController _controller, bytes32 _controllerLookupName) public {
         controller = _controller;
@@ -77,12 +91,6 @@ contract Delegator is DelegationTarget {
     }
 }
 ```
-
-In Augur there are several contracts meant to be used as [singletons](https://en.wikipedia.org/wiki/Singleton_pattern); i.e. there is only one instance.  Other contracts are created by factories.
-
-### Singletons
-
-Singleton contracts are registered twice in the controller: the first being an instance of the contract and the second being an instance of a Delegator registered under the original name and pointing to the first instance.  In this way the Delegator instance is the place of storage for the contract, while the actual contract is registered separately and can be swapped out for different behaviour.
 
 ### Factories
 
@@ -122,7 +130,9 @@ contract ExampleValueObject is DelegationTarget, IExampleValueObject {
 
 Contracts that wish to create new instances will use the Controller to lookup the contract factory then call the factory's create method to create a new instance of a contract.
 
-You may have noticed that the ExampleValueObject inherits from DelegationTarget somewhat needlessly; but this is so that the ExampleValueObject storage will be correctly offset by the amount of storage required by the Delegator, thereby preventing any memory from being trampled.  The storage variable constraints are nicely detailed in this [gist](https://gist.github.com/Arachnid/4ca9da48d51e23e5cfe0f0e14dd6318f) by Nick Johnson.
+### Singletons
+
+Singleton contracts are registered twice in the controller: the first being an instance of the contract and the second being an instance of a Delegator registered under the original name and pointing to the first instance.  In this way the Delegator instance is the place of storage for the contract, while the actual contract is registered separately and can be swapped out for different behaviour.
 
 ### Upgrades
 
