@@ -2,7 +2,7 @@
 
 ## Introduction
 
-In this article I examine two major Ethereum projects to see how they approach contract storage and upgrades.  I try to stick strictly to analysis and avoid giving opinions or making assumptions.  I examined [Augur](http://www.augur.net/) and [Colony](https://colony.io/) because they are mature and have public code bases.
+I will examine two major Ethereum projects to see how they approach contract storage and upgrades.  I try to stick strictly to analysis and avoid giving opinions or making assumptions.  I examined [Augur](http://www.augur.net/) and [Colony](https://colony.io/) because they are mature and have public code bases.
 
 My background is in web and mobile application development.  After writing my first few dapps, I quickly realized there were major shortcomings in my application architecture.  The immutability of smart contracts requires the developer to carefully consider how code will be updated.  I read all about upgradeable contract patterns, but I still didn't see how they fit into the application as a whole.  I decided to read the code bases of a number of projects.  Augur and Colony were my favourites.
 
