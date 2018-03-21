@@ -209,9 +209,9 @@ Colony uses Truffle for contract deployment.  The steps are as follows:
 
 ### Storage
 
-The first EtherRouter that is deployed becomes the main point of entry for the platform.  It acts as the storage and will take on the storage shape and behaviour of the contracts in it's Resolver for the Colony Network (it's shape will be the same as ColonyNetworkStorage).
+The first EtherRouter that is deployed becomes the main point of entry for the platform and will take on the storage shape and behaviour of the contracts in the first Resolver.  The first resolver contains the Colony Network contracts and will therefore have the same shape as ColonyNetworkStorage.
 
-The Colony Network creates new colonies by creating new EtherRouter instance that point to the latest version of the Colony Resolver.  The EtherRouter will take on the storage shape of the contracts registered in it's Resolver.
+The Colony Network creates new colonies by creating new EtherRouter instances that point to the latest version of the Resolvers.  Each Colony can upgrade their contract versions independently.
 
 ##### Upgrades
 
