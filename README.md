@@ -44,7 +44,7 @@ contract Controller {
 }
 ```
 
-This allows any contract to look up another using a hashed name.  It also means that contracts can be replaced at runtime by re-registering them.
+This allows any contract to look up another using a hashed name.  It also means that contracts can be replaced at runtime by re-registering them; keeping in mind that the storage shape must only be appended to.
 
 ## Deployment
 
@@ -82,16 +82,16 @@ In Augur there are several contracts meant to be used as [singletons](https://en
 
 ### Singletons
 
-Singleton contracts are registered twice in the controller: the first being an instance of the contract whose name is suffixed with 'Target' and the second being a Delegator registered under the original name and pointing to the suffixed name.  In this way the Delegator instance is the point of contact and storage for the contract, while the actual contract is registered separately and can be swapped out for different behaviour.
+Singleton contracts are registered twice in the controller: the first being an instance of the contract and the second being an instance of a Delegator registered under the original name and pointing to the first instance.  In this way the Delegator instance is the place of storage for the contract, while the actual contract is registered separately and can be swapped out for different behaviour.
 
 ### Factories
 
-Some contracts are created dynamically at runtime.  Each of these contracts will have a corresponding factory.  The factories instantiate Delegator contracts that delegate to the actual contract.
+Some contracts are created dynamically at runtime.  Each of these contracts will have a corresponding factory.  The factories instantiate Delegator contracts that point to their actual contracts.
 
 For example:
 
 ```solidity
-// Assume that ExampleValueObject has been registered with the Controller under 'ExampleValueObject'
+// Assume that ExampleValueObject has been created and registered with the Controller under 'ExampleValueObject'
 
 contract ExampleFactory is Controlled {
   function createExample() external returns (IExampleValueObject) {
@@ -122,11 +122,11 @@ contract ExampleValueObject is DelegationTarget, IExampleValueObject {
 
 Contracts that wish to create new instances will use the Controller to lookup the contract factory then call the factory's create method to create a new instance of a contract.
 
-You may have noticed that the ExampleValueObject inherits from DelegationTarget somewhat needlessly; but this is so that the ExampleValueObject storage will be correctly offset by the amount of storage required by the Delegator, thereby preventing any memory from being trampled.  The memory constraints are nicely detailed in this [gist](https://gist.github.com/Arachnid/4ca9da48d51e23e5cfe0f0e14dd6318f) by Nick Johnson.
+You may have noticed that the ExampleValueObject inherits from DelegationTarget somewhat needlessly; but this is so that the ExampleValueObject storage will be correctly offset by the amount of storage required by the Delegator, thereby preventing any memory from being trampled.  The storage variable constraints are nicely detailed in this [gist](https://gist.github.com/Arachnid/4ca9da48d51e23e5cfe0f0e14dd6318f) by Nick Johnson.
 
 ### Upgrades
 
-Augur is partially upgradeable.  The majority of contracts can be swapped out at runtime by re-registering them in the Controller, but some core contracts of the system such as Controller and Augur cannot be swapped out: changing these contracts would necessitate an entirely new app deployment.
+Augur is partially upgradeable.  The majority of contracts can be swapped out at runtime by re-registering them in the Controller, but some core contracts such as Controller and Augur cannot be swapped out: changing these contracts would necessitate an entirely new app deployment.
 
 It's interesting to note that they plan on locking down the registry by disabling a '[dev-mode](https://github.com/AugurProject/augur-core/blob/7f3c79a5dd471a98df8f66a640902e063f15f796/source/contracts/Controller.sol#L6)' in the Controller.  At some point they will freeze the contracts in production and lock themselves out of the Controller.  Afterwards, if they want to upgrade, they will need to deploy an entirely new version of the application.
 
@@ -209,9 +209,9 @@ Colony uses Truffle for contract deployment.  The steps are as follows:
 
 ### Storage
 
-When the Colony Network goes to create a new Colony it will create an EtherRouter instance that points to the latest version of the Colony Resolver.  In this way the Colony EtherRouter will take on the storage shape of the contract registered in it's Resolver.
-
 The first EtherRouter that is deployed becomes the main point of entry for the platform.  It acts as the storage and will take on the storage shape and behaviour of the contracts in the Colony Network Resolver (it's shape will be the same as ColonyNetworkStorage).
+
+The Colony Network creates new colonies by creating new EtherRouter instance that point to the latest version of the Colony Resolver.  The EtherRouter will take on the storage shape of the contracts registered in it's Resolver.
 
 ##### Upgrades
 
