@@ -1,33 +1,18 @@
-# Contract Storage and Upgrades in Production Ethereum Dapps
-
-## Motivation
-
-For the past few months I've immersed myself in Ethereum development.  I began with the mechanics of Ethereum: from how the chain is built to the structure of solidity code and helpful frameworks.
-
-With that knowledge in place I wrote some simple Dapps using Web3.  Being a professional developer I got up and running pretty quickly.  However, after deploying even the most basic contracts I began to notice some serious deficiencies in how I was structuring my code.
-
-I come from a traditional web background with some dabbling in iOS and React Native.  The application code was only ever accessible by my team, and if there was a bug or security hole we simply deployed new code.
-
-The immutable environment of Ethereum is a completely different beast.  When a smart contract has been deployed it's behavior is preserved on the chain forever; the only change that can occur is within the stored state.
-
-This means two things:
-
-1. Smart contracts need thorough auditing before they are deployed.  An exploit in an Ethereum contract can lead to financial theft rather than more mundane (arguably) data theft in traditional web applications.
-2. If there is a bug in smart contract code we *have* to be able to update it's behaviour.
-
-Smart contract security is covered really well by articles all over the internet.  The exploits are famous (see the [DAO](http://hackingdistributed.com/2016/06/18/analysis-of-the-dao-exploit/)) and have been well publicized and analyzed.
-
-Contract upgradeability is also [well defined](https://blog.indorse.io/ethereum-upgradeable-smart-contract-strategies-456350d0557c), but how the pattern fits into application architecture was less clear to me.  I decided to survey the landscape of Ethereum projects.
+# Contract Storage and Upgrade Patterns in Augur and Colony
 
 ## Introduction
 
-In this article I examine several mature Ethereum projects to see how they approach contract storage and upgrades.  I've tried to stick strictly to analysis and have avoided giving opinions or making assumptions.  I'll be examining [Augur](http://www.augur.net/), [Colony](https://colony.io/), [Aragon](https://aragon.one/) and [Rocket Pool](https://www.rocketpool.net/).  I picked these projects because they are relatively complete, have public codebases, and showcase something unique.
+In this article I examine two major Ethereum projects to see how they approach contract storage and upgrades.  I try to stick strictly to analysis and avoid giving opinions or making assumptions.  I examined [Augur](http://www.augur.net/) and [Colony](https://colony.io/) because they are mature and have public code bases.
 
-Before continuing you should have a solid understanding of the [`DELEGATECALL`](http://solidity.readthedocs.io/en/develop/assembly.html) opcode.  Most of the projects use this opcode to implement upgradeable contracts.  For a post-Byzantium example of opcode usage see Manuel Aráoz's [Dispatcher](https://github.com/maraoz/solidity-proxy/blob/master/contracts/Dispatcher.sol). For a pre-Byzantium example see [EtherRouter](https://github.com/ownage-ltd/ether-router). More examples can be found in the references section below.
+My background is in web and mobile application development.  After writing my first few dapps, I quickly realized there were major shortcomings in my application architecture.  The immutability of smart contracts requires the developer to carefully consider how code will be updated.  I read all about upgradeable contract patterns, but I still didn't see how they fit into the application as a whole.  I decided to read the code bases of a number of projects.  Augur and Colony were my favourites.
+
+Before continuing you **must** have a solid understanding of the [`DELEGATECALL`](http://solidity.readthedocs.io/en/develop/assembly.html) opcode.  Martin Swende gives an excellent [explanation](http://martin.swende.se/blog/EVM-Assembly-trick.html) of it's usage. Most projects use this opcode to implement upgradeable contracts.  Quite often the pattern is called Proxy, Delegator, or Dispatcher.  Because the `returndatasize` opcode was introduced in Byzantium, there are two different styles of Delegators.  The newer style uses the `returndatasize` opcode to provide a generic solution.  The old style requires the developer to track the return value storage size of each function registered. For a post-Byzantium example of generic opcode usage see Manuel Aráoz's [Dispatcher](https://github.com/maraoz/solidity-proxy/blob/master/contracts/Dispatcher.sol). For a pre-Byzantium example see [EtherRouter](https://github.com/ownage-ltd/ether-router).
+
+For a high-level overview of the different storage and upgrade patterns, see [Jack Tanner's article](https://blog.indorse.io/ethereum-upgradeable-smart-contract-strategies-456350d0557c).  He has also listed numerous useful links.
 
 ## Augur
 
-[Augur](http://www.augur.net/) is a prediction market that allows people to gamble on the outcomes of future events.  It's been under development since 2014 and has a strong team of developers behind it.  Augur publishes it's smart contracts to Github under [augur-core](https://github.com/AugurProject/augur-core).
+[Augur](http://www.augur.net/) is a prediction market; it allows people to bet on the outcomes of future events.  It's been under development since 2014 and has a strong team of developers behind it.  Augur publishes it's smart contracts to Github under [augur-core](https://github.com/AugurProject/augur-core).
 
 Augur consists of 70+ smart contracts.  Nearly all of the contracts inherit from [Controlled](https://github.com/AugurProject/augur-core/blob/7f3c79a5dd471a98df8f66a640902e063f15f796/source/contracts/Controlled.sol).  Controlled contracts store a reference to a [Controller](https://github.com/AugurProject/augur-core/blob/7f3c79a5dd471a98df8f66a640902e063f15f796/source/contracts/Controller.sol).
 
@@ -69,11 +54,11 @@ Augur uses a set of custom deployment scripts written in TypeScript to deploy th
 2. The Augur contract is deployed and updated with the Controller address.
 3. The remaining contracts are each deployed, updated with the Controller address, and then registered with the Controller.
 
-In this way we can see that the system is partially upgradeable.  The Controller and Augur contracts are static, but the rest of the contracts can be upgraded by re-registering them with the controller.
+In this way we can see that the system is partially upgradeable.  The Controller and Augur contracts are static, but the rest of the contracts can be upgraded.
 
 ## Storage
 
-Augur contracts contain both state variables and behaviour.  They have not been separated. However, in a running application, the state is actually stored in Delegator instances.  The Delegators will delegate to a registered contract and therefore adopt the same storage shape and behaviour.
+Augur contracts contain both state variables and behaviour.  They have not been separated in the written code. However, in a running application, the state is actually stored in Delegator instances.  A Delegator in Augur is a contract that can delegate all function calls to another contract (using the DELEGATECALL opcode).  The Delegators will therefore adopt the same storage shape and behaviour as the target contract.
 
 ```solidity
 contract DelegationTarget is Controlled {
@@ -93,9 +78,15 @@ contract Delegator is DelegationTarget {
 }
 ```
 
+In Augur there are several contracts meant to be used as [singletons](https://en.wikipedia.org/wiki/Singleton_pattern); i.e. there is only one instance.  Other contracts are created by factories.
+
+### Singletons
+
+Singleton contracts are registered twice in the controller: the first being an instance of the contract whose name is suffixed with 'Target' and the second being a Delegator registered under the original name and pointing to the suffixed name.  In this way the Delegator instance is the point of contact and storage for the contract, while the actual contract is registered separately and can be swapped out for different behaviour.
+
 ### Factories
 
-To create these Delegator instances nearly every contract type has a corresponding factory.
+Some contracts are created dynamically at runtime.  Each of these contracts will have a corresponding factory.  The factories instantiate Delegator contracts that delegate to the actual contract.
 
 For example:
 
@@ -117,7 +108,7 @@ contract ExampleValueObject is DelegationTarget, IExampleValueObject {
   }
 }
 
-// Assume that ExampleValueObject has been registered with the Controller
+// Assume that ExampleValueObject has been registered with the Controller under 'ExampleValueObject'
 
 contract ExampleFactory is Controlled {
   function createExample() external returns (IExampleValueObject) {
@@ -129,17 +120,13 @@ contract ExampleFactory is Controlled {
 }
 ```
 
-Contracts will use the Controller to lookup the contract factory, then call the factory's create method to create a new instance of a contract.
+Contracts that wish to create new instances will use the Controller to lookup the contract factory then call the factory's create method to create a new instance of a contract.
 
 You may have noticed that the ExampleValueObject inherits from DelegationTarget somewhat needlessly; this is so that the ExampleValueObject storage will be correctly offset by the amount of storage required by the Delegator, thereby preventing any memory from being trampled.  The memory constraints are nicely detailed in this [gist](https://gist.github.com/Arachnid/4ca9da48d51e23e5cfe0f0e14dd6318f) by Nick Johnson.
 
-### Singletons
-
-Some contracts exist globally as singletons and don't need a factory. These singletons are instead registered twice in the controller: the first being an instance of the contract whose name is suffixed with 'Target' and the second being a Delegator registered under the original name and pointing to the suffixed name.  In this way the original contract with the suffixed name can be swapped out while the Delegator remains the same.  Savvy?
-
 ### Upgrades
 
-Augur is partially upgradeable.  The majority of contracts can be swapped out at runtime by re-registering them in the Controller, but some core contracts of the system such as Controller and Augur cannot be swapped out: changing these contracts would necessitate an entirely new app deployment.  In fact there is code that halts the entire system and allows users to withdraw their funds.
+Augur is partially upgradeable.  The majority of contracts can be swapped out at runtime by re-registering them in the Controller, but some core contracts of the system such as Controller and Augur cannot be swapped out: changing these contracts would necessitate an entirely new app deployment.
 
 It's interesting to note that they plan on locking down the registry by disabling a '[dev-mode](https://github.com/AugurProject/augur-core/blob/7f3c79a5dd471a98df8f66a640902e063f15f796/source/contracts/Controller.sol#L6)' in the Controller.  At some point they will freeze the contracts in production and lock themselves out of the Controller.  Afterwards, if they want to upgrade, they will need to deploy an entirely new version of the application.
 
@@ -147,13 +134,13 @@ It's interesting to note that they plan on locking down the registry by disablin
 
 [Colony](https://colony.io/) is a platform for creating decentralized organizations.  The code has recently been made public on Github under the [colonyNetwork](https://github.com/JoinColony/colonyNetwork) project.   The project history began in early 2016.
 
-Colony consists of about 14 smart contracts.  Conceptually, these contracts can be divided into those that concern the Colony Network as a whole, and those that concern an individual Colony.  Concretely, the two groups are delineated by their inheritance hierarchy; all state variables are stored in either the [ColonyNetworkStorage](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyNetworkStorage.sol) or the [ColonyStorage](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyStorage.sol) contracts.  All contracts inherit from one of these.
+Colony consists of about 14 smart contracts. The smart contracts use the [EtherRouter](https://github.com/ownage-ltd/ether-router) pattern to upgrade contracts. Conceptually, these contracts can be divided into those that concern the Colony Network as a whole, and those that concern an individual Colony.  Concretely, the two groups are delineated by their inheritance hierarchy; all contracts inherit from either the [ColonyNetworkStorage](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyNetworkStorage.sol) or the [ColonyStorage](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyStorage.sol) contracts.  The ColonyNetworkStorage and ColonyStorage contracts store all of the state variables for their respective descendants.
 
 An individual Colony is defined by the contracts [Colony](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/Colony.sol), [ColonyTask](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyTask.sol), [ColonyFunding](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyFunding.sol), and [ColonyTransactionReviewer](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyTransactionReviewer.sol).  These contracts all inherit from ColonyStorage.
 
 The Colony Network is defined by two contracts: [ColonyNetwork](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyNetwork.sol) and [ColonyNetworkStaking](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyNetworkStaking.sol).  These contracts inherit from ColonyNetworkStorage.
 
-The contracts within each group are registered with their respective [Resolver](https://github.com/JoinColony/colonyNetwork/blob/develop/contracts/Resolver.sol) instances. The Resolver acts as a function registry; contract addresses are looked up by their function signatures.
+Each group of contracts has a [Resolver](https://github.com/JoinColony/colonyNetwork/blob/develop/contracts/Resolver.sol) instance in which they are all registered. The Resolver acts as a function registry; contract addresses are looked up by their function signatures.
 
 ```solidity
 // Simplified for brevity
@@ -211,8 +198,8 @@ Colony uses Truffle for contract deployment.  The steps are as follows:
   - EtherRouter
   - Resolver
 2. The ColonyNetwork and ColonyNetworkStaking contracts are registered with the Resolver
-3. The EtherRouter is set to point to the Resolver
-4. The Colony contracts are deployed to the network
+3. The EtherRouter is set to point to the Resolver and serves as the main point of contact for the Colony Network
+4. The Colony contracts are deployed:
   - Colony
   - ColonyTask
   - ColonyFunding
@@ -222,9 +209,9 @@ Colony uses Truffle for contract deployment.  The steps are as follows:
 
 ### Storage
 
-The first EtherRouter that is deployed becomes the main point of entry for the platform.  It acts as the storage and will take on the storage shape and behaviour of the contracts in the Colony Network Resolver (it's shape will be the same as ColonyNetworkStorage).
+When the Colony Network goes to create a new Colony it will create an EtherRouter instance that points to the latest version of the Colony Resolver.  In this way the Colony EtherRouter will take on the storage shape of the contract registered in it's Resolver.
 
-As mentioned previously, when the Colony Network creates a Colony it will create a new instance of an EtherRouter that points to the latest version of the Colony Resolver.  In this way the Colony EtherRouter will take on the storage shape of the latest Resolver version (it's shape will be the same as ColonyStorage).
+The first EtherRouter that is deployed becomes the main point of entry for the platform.  It acts as the storage and will take on the storage shape and behaviour of the contracts in the Colony Network Resolver (it's shape will be the same as ColonyNetworkStorage).
 
 ##### Upgrades
 
@@ -232,60 +219,56 @@ Colony is almost entirely upgradeable; the only exceptions are the EtherRouter a
 
 To upgrade the Colony Network contracts the user would need to deploy and register the new contracts with the global Resolver.  The global EtherRouter would immediately refer to the new code and the behaviour of the Colony Network would change.
 
-To upgrade the Colony, ColonyTask, ColonyFunding or ColonyTransactionReviewer contracts the user would need to deploy and register the contract with a new Resolver, then add that resolver as a new version in the Colony Network.  They can then use the [`ColonyNetwork#upgradeColony(...)`](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyNetwork.sol#L171) to upgrade their Colony to the new version.
+To upgrade the Colony, ColonyTask, ColonyFunding or ColonyTransactionReviewer contracts the user would need to deploy and register the contracts with a new Resolver, then add that resolver as a new version in the Colony Network.  They can then use the [`ColonyNetwork#upgradeColony(...)`](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyNetwork.sol#L171) to upgrade their Colony to the new version.
 
-#### Summary
+## Summary and Reflection
 
-Colony uses the pre-Byzantium style [EtherRouter](https://github.com/ownage-ltd/ether-router) pattern to upgrade contracts.  A global Resolver is maintained for ColonyNetwork and ColonyNetworkStaking contracts and a versioned registry of Resolvers is maintained within the ColonyNetwork so that Colonies can be independently versioned and upgraded.
+Both Augur and Colony rely on a generic proxy contract bound to a contract registry.  Augur always uses the latest version of a contract, while Colony allows colonies to be individually versioned.  Augur plans on locking down their contracts eventually, while Colony will remain upgradeable.
 
-## Rocketpool
+The contract registry pattern actually reminded me of an approach that was becoming popular before I left the Java world called [Inversion of Control](https://martinfowler.com/bliki/InversionOfControl.html).  Inversion of control is where the caller of a service is the one that supplies the service's dependencies rather than the service creating or discovering dependencies.  Code generally becomes much more modular and testable as a result.
 
-[Rocketpool](https://www.rocketpool.net/) is an application that provides staking pools for the upcoming Casper proof-of-stake protocol for Ethereum.  It's not an old codebase, but it showcases a very different approach that I think is worth discussing.  The project began around the end of 2016.  The smart contract code is published on Github under [rocketpool](https://github.com/rocket-pool/rocketpool).
+[Service locator](https://martinfowler.com/articles/injection.html#UsingAServiceLocator) is the IoC pattern that resembles contract registries.  When an object wants to use a service, it uses the service locator to retrieve an instance of the service object.  [Dependency injection](https://martinfowler.com/articles/injection.html#FormsOfDependencyInjection) is similar, but instead a container manages the dependencies and injects them into instances of objects.  [Aragon](https://aragon.one/) is a good example of constructor injected DI. Aragon 'apps' declare their dependencies in a JSON file and when the app is deployed the Aragon OS injects the dependencies into the app smart contract.  Here is the Aragon core team's [Finance app contract initializer](https://github.com/aragon/aragon-apps/blob/c1182ccc0975a4f5e828eec4c81aa8a2c8baad45/apps/finance/contracts/Finance.sol#L114).
 
-Rocketpool consists of about 16 contracts.  This is the only project I reviewed that does not use the DELEGATECALL opcode; instead opting for a design that [separates storage and behaviour](https://medium.com/rocket-pool/upgradable-solidity-contract-design-54789205276d).
+Another big takeaway for me was the complexity that delegates introduce.  Strict convention is required to ensure that the storage shape of contracts remain the same, and there can be a disparity between how code lays out storage and the storage shape at runtime.  For example in Colony groups of contracts are combined into a single delegate, so the storage variables across the entire group need to match.  Augur improves on this by having each contract correspond to a single delegate, so the storage variable shape is scoped to just one contract.
 
-All of the contracts, with the exception of [RocketStorage](https://github.com/rocket-pool/rocketpool/blob/3e66165880346f0c4e95c7eea345b5cecdf3defc/contracts/RocketStorage.sol) inherit from the [RocketBase](https://github.com/rocket-pool/rocketpool/blob/3e66165880346f0c4e95c7eea345b5cecdf3defc/contracts/RocketBase.sol).  The RocketBase contract stores the address of the RocketStorage contract:
+Diving into the code bases was a really interesting exercise.  I'd recommend it to any solidity developer because the code bases are well-structured and rich with ideas.  For example Augur has the ability to freeze the entire app but allow safety withdrawals, and Colony has a fine-grained permission system that allows certain accounts to upgrade colonies.
+
+
+
+
+
+
+
+
+
+
+
+<!--
+This challenge in managing data shape changes reminded me of the aggregate pattern in Domain Driven Design.  Aggregates are objects that serves as the 'root entity' that binds together of group of objects.
+
+For example, here is a product object:
+
+```yml
+Product:
+  - price
+  - colour
+  - inventory_count
+  - size
+```
+
+We may store them in a contract as products:
 
 ```solidity
-contract RocketBase {
-    RocketStorageInterface rocketStorage = RocketStorageInterface(0);
+contract Product {
+  uint256 price,
+  string colour,
+  uint256 inventoryCount,
+  string size
+}
 
-    function RocketBase(address _rocketStorageAddress) public {
-        rocketStorage = RocketStorageInterface(_rocketStorageAddress);
-    }
+contract ProductManager {
+  address[] products; // Contain Delegators bound to the above Product
 }
 ```
 
-The RocketStorage contract serves as a generic data store holding registries of primitives such as addresses, uint256, bool etc.
-
-```solidity
-contract RocketStorage {
-    mapping(bytes32 => uint256)    private uIntStorage;
-    mapping(bytes32 => string)     private stringStorage;
-    mapping(bytes32 => address)    private addressStorage;
-    mapping(bytes32 => bytes)      private bytesStorage;
-    mapping(bytes32 => bool)       private boolStorage;
-    mapping(bytes32 => int256)     private intStorage;
-}
-```
-
-
-
-
-
-## Aragon
-
-Aragon is a very interesting project and an exception on this list as it's an app framework.  Aragon itself has been recently modularized into Aragon OS apps.  You can see their announcement [here](https://blog.aragon.one/introducing-aragonos-3-0-alpha-the-new-operating-system-for-protocols-and-dapps-348f7ac92cff).
-
-
-
-## References
-
-### DELEGATECALL Patterns
-
-The Byzantium fork introduced the `returndatasize` opcode that allowed for the Delegate pattern to be generic.
-
-- Byzantium-style [Dispatcher](https://github.com/maraoz/solidity-proxy/blob/master/contracts/Dispatcher.sol)
-- Pre-Byzantium [Dispatcher](https://gist.github.com/Arachnid/4ca9da48d51e23e5cfe0f0e14dd6318f)
- [Proxy](http://martin.swende.se/blog/EVM-Assembly-trick.html)
-- Pre-Byzantium [EtherRouter](https://github.com/ownage-ltd/ether-router)
+So when we add new properties to the Product we need to make sure that we only append to the Product contract. -->
