@@ -74,9 +74,9 @@ In this way we can see that the system is partially upgradeable.  The Controller
 
 ## Storage
 
-Augur stores some of it's data in [singletons](https://en.wikipedia.org/wiki/Singleton_pattern); i.e. there is only one global instance.  The rest of the data is stored in contracts created by factories.
+Augur stores some of it's data in [singletons](https://en.wikipedia.org/wiki/Singleton_pattern); i.e. there is only one global instance.  The rest of the data is stored in Delegator contracts created by factories.
 
-When a new contract is created, it is always a Delegator instance pointing to the corresponding contract.  A Delegator is a contract that delegates all function calls to another contract using the DELEGATECALL opcode.  The Delegators will therefore adopt the same storage shape and behaviour as the target contract.
+A Delegator is a contract that delegates all function calls to another contract using the DELEGATECALL opcode.  The Delegators will therefore adopt the same storage shape and behaviour as the target contract.
 
 ```solidity
 contract Delegator is DelegationTarget {
