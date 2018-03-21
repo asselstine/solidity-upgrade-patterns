@@ -91,6 +91,17 @@ Some contracts are created dynamically at runtime.  Each of these contracts will
 For example:
 
 ```solidity
+// Assume that ExampleValueObject has been registered with the Controller under 'ExampleValueObject'
+
+contract ExampleFactory is Controlled {
+  function createExample() external returns (IExampleValueObject) {
+    Delegator d = new Delegator(controller, 'ExampleValueObject');
+    IExampleValueObject exampleValueObject = IExampleValueObject(d);
+    exampleValueObject.initialize();
+    return exampleValueObject;
+  }
+}
+
 contract IExampleValueObject {
   function initialize() external;
   function get() external view returns (uint);
@@ -107,22 +118,11 @@ contract ExampleValueObject is DelegationTarget, IExampleValueObject {
     return value;
   }
 }
-
-// Assume that ExampleValueObject has been registered with the Controller under 'ExampleValueObject'
-
-contract ExampleFactory is Controlled {
-  function createExample() external returns (IExampleValueObject) {
-    Delegator d = new Delegator(controller, 'ExampleValueObject');
-    IExampleValueObject exampleValueObject = IExampleValueObject(d);
-    exampleValueObject.initialize();
-    return exampleValueObject;
-  }
-}
 ```
 
 Contracts that wish to create new instances will use the Controller to lookup the contract factory then call the factory's create method to create a new instance of a contract.
 
-You may have noticed that the ExampleValueObject inherits from DelegationTarget somewhat needlessly; this is so that the ExampleValueObject storage will be correctly offset by the amount of storage required by the Delegator, thereby preventing any memory from being trampled.  The memory constraints are nicely detailed in this [gist](https://gist.github.com/Arachnid/4ca9da48d51e23e5cfe0f0e14dd6318f) by Nick Johnson.
+You may have noticed that the ExampleValueObject inherits from DelegationTarget somewhat needlessly; but this is so that the ExampleValueObject storage will be correctly offset by the amount of storage required by the Delegator, thereby preventing any memory from being trampled.  The memory constraints are nicely detailed in this [gist](https://gist.github.com/Arachnid/4ca9da48d51e23e5cfe0f0e14dd6318f) by Nick Johnson.
 
 ### Upgrades
 
@@ -140,7 +140,7 @@ An individual Colony is defined by the contracts [Colony](https://github.com/Joi
 
 The Colony Network is defined by two contracts: [ColonyNetwork](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyNetwork.sol) and [ColonyNetworkStaking](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyNetworkStaking.sol).  These contracts inherit from ColonyNetworkStorage.
 
-Each group of contracts has a [Resolver](https://github.com/JoinColony/colonyNetwork/blob/develop/contracts/Resolver.sol) instance in which they are all registered. The Resolver acts as a function registry; contract addresses are looked up by their function signatures.
+Each group of contracts has a [Resolver](https://github.com/JoinColony/colonyNetwork/blob/develop/contracts/Resolver.sol) instance in which they are all registered. The Resolver acts as a function registry.  An EtherRouter is bound to a Resolver and looks up function addresses to delegate to.  In this way an EtherRouter will take on all the functions in a Resolver and the shape of the registered contracts.
 
 ```solidity
 // Simplified for brevity
@@ -161,7 +161,7 @@ contract Resolver is DSAuth {
 
 This means that function signatures [must be unique](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/helpers/upgradable-contracts.js#L12) across any contracts that are registered with the Resolver.  This also means that the registered contracts must share the same storage shape, because [EtherRouter](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/EtherRouter.sol) instances that point to this Resolver will take on the behaviour of all the registered contract functions.
 
-A Resolver that contains a set of Colony contracts is registered and versioned with the ColonyNetwork contract using the [`addColonyVersion()`](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyNetwork.sol#L153) method.
+The set of contracts for an individual colony are registered with a Resolver then that resolver is registered as a version in the ColonyNetwork contract using the [`addColonyVersion()`](https://github.com/JoinColony/colonyNetwork/blob/82764b58a52c19326957316e46328662e3e80de7/contracts/ColonyNetwork.sol#L153) method.
 
 ```solidity
 contract ColonyNetwork is ColonyNetworkStorage {
