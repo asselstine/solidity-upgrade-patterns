@@ -12,7 +12,7 @@ For a high-level overview of the different storage and upgrade patterns, see [Ja
 
 ## Augur
 
-[Augur](http://www.augur.net/) is a prediction market; it allows people to bet on the outcomes of future events.  It's been under development since 2014 and has a strong team of developers behind it.  Augur publishes it's smart contracts to Github under [augur-core](https://github.com/AugurProject/augur-core).
+[Augur](http://www.augur.net/) is a prediction market; it allows people to bet on the outcomes of future events.  It's been under development since 2014.  Augur publishes it's smart contracts to Github under [augur-core](https://github.com/AugurProject/augur-core).
 
 Augur consists of 70+ smart contracts.  Nearly all of the contracts inherit from [Controlled](https://github.com/AugurProject/augur-core/blob/7f3c79a5dd471a98df8f66a640902e063f15f796/source/contracts/Controlled.sol).  Controlled contracts store a reference to a [Controller](https://github.com/AugurProject/augur-core/blob/7f3c79a5dd471a98df8f66a640902e063f15f796/source/contracts/Controller.sol).
 
